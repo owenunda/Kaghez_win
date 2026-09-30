@@ -1,0 +1,80 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, windows-port]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Suwayomi jar is ~180 MB in Git LFS; cache it so every run
+      # doesn't eat into the LFS bandwidth quota.
+      - name: List LFS objects
+        run: git lfs ls-files --long > .lfs-ids
+      - uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-ids') }}
+      - name: Fetch LFS objects
+        run: git lfs pull
+
+      - name: Get MSYS2 package list
+        id: packages
+        shell: bash
+        run: echo "list=$(bash build-aux/windows/build.sh --print-packages)" >> "$GITHUB_OUTPUT"
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: ${{ steps.packages.outputs.list }}
+
+      - name: Build app
+        shell: msys2 {0}
+        run: bash build-aux/windows/build.sh --no-deps
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $internal = "_build-windows/dist/Kaghez/_internal"
+          foreach ($f in @(
+              "share/kaghez/kaghez.gresource",
+              "share/kaghez/Suwayomi-Server-v2.3.2361.jar",
+              "share/kaghez/schemas/gschemas.compiled",
+              "share/kaghez/jre/bin/java.exe")) {
+            if (-not (Test-Path "$internal/$f")) { throw "missing $f" }
+          }
+          & "$internal/share/kaghez/jre/bin/java.exe" -version
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.8.8-$($env:GITHUB_SHA.Substring(0,7))" }
+          $env:KAGHEZ_VERSION = $version
+          & $iscc build-aux\windows\kaghez.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Compress-Archive -Path _build-windows/dist/Kaghez -DestinationPath "_build-windows/installer/Kaghez-$version-portable-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kaghez-windows
+          path: _build-windows/installer/*
+          compression-level: 0
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: _build-windows/installer/*

@@ -85,6 +85,7 @@ kaghez_sources = [
   '__init__.py',
   'main.py',
   'actions.py',
+  'winproc.py',
 ]
 
 install_data(kaghez_sources, install_dir: moduledir)

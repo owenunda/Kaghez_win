@@ -19,17 +19,39 @@ from .widgets.setup import SetupWindow
 
 from .integrations import Suwayomi
 
+if sys.platform == "win32":
+    from . import winproc
+
 LOCAL_SERVER_URL = "http://localhost:4567"
 SERVER_READY_TIMEOUT = 10
 SERVER_POLL_INTERVAL = 0.5
+# Cold starts are much slower on Windows: Defender scans the ~180 MB jar
+# and the bundled JRE the first time they run.
+LOCAL_SERVER_READY_TIMEOUT = 60 if sys.platform == "win32" else SERVER_READY_TIMEOUT
+SERVER_JAR = 'Suwayomi-Server-v2.3.2361.jar'
+
+
+def get_pkgdatadir() -> str:
+    if getattr(sys, 'frozen', False):
+        # PyInstaller keeps our modules inside its archive, so __file__
+        # doesn't point into the installed tree. The data lives where
+        # kaghez.in's frozen branch puts pkgdatadir.
+        return os.path.join(sys._MEIPASS, 'share', 'kaghez')
+    moduledir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(moduledir)
 
 
 class KaghezApplication(Adw.Application):
     """The main application singleton class."""
 
     def __init__(self):
+        flags = Gio.ApplicationFlags.DEFAULT_FLAGS
+        if sys.platform == "win32":
+            # Single-instance mode goes through D-Bus, which Windows
+            # doesn't have without shipping and autolaunching gdbus.exe.
+            flags |= Gio.ApplicationFlags.NON_UNIQUE
         super().__init__(application_id='com.rini.kaghez',
-                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+                         flags=flags,
                          resource_base_path='/com/rini/kaghez')
         self.settings = Gio.Settings(schema_id="com.rini.kaghez")
         self.suwayomi = Suwayomi()
@@ -91,7 +113,8 @@ class KaghezApplication(Adw.Application):
 
         self.suwayomi.reconnect(server_url)
 
-        if not await self.wait_for_server_ready():
+        timeout = LOCAL_SERVER_READY_TIMEOUT if mode == "local" else SERVER_READY_TIMEOUT
+        if not await self.wait_for_server_ready(timeout):
             if mode == "local":
                 self.stop_local_server()
             return False
@@ -103,10 +126,15 @@ class KaghezApplication(Adw.Application):
         return True
 
     def find_bundled_jar(self) -> str | None:
-        moduledir = os.path.dirname(os.path.abspath(__file__))
-        pkgdatadir = os.path.dirname(moduledir)
-        jar_path = os.path.join(pkgdatadir, 'Suwayomi-Server-v2.3.2361.jar')
+        jar_path = os.path.join(get_pkgdatadir(), SERVER_JAR)
         return jar_path if os.path.isfile(jar_path) else None
+
+    def find_java(self) -> str:
+        """Prefer a JRE shipped next to the jar (the Windows build bundles
+        one); otherwise rely on `java` from PATH, like the Flatpak does."""
+        java_name = "java.exe" if sys.platform == "win32" else "java"
+        bundled = os.path.join(get_pkgdatadir(), 'jre', 'bin', java_name)
+        return bundled if os.path.isfile(bundled) else "java"
 
     async def start_local_server(self) -> bool:
         if self.server_proc is not None:
@@ -117,17 +145,28 @@ class KaghezApplication(Adw.Application):
             print("local Suwayomi server jar not found")
             return False
 
+        argv = [
+            self.find_java(),
+            "-Dsuwayomi.tachidesk.config.server.systemTrayEnabled=false",
+            "-Dsuwayomi.tachidesk.config.server.initialOpenInBrowserEnabled=false",
+            "-Dsuwayomi.tachidesk.config.server.kcefEnabled=false",
+            "-jar", jar_path,
+        ]
+
+        if sys.platform == "win32":
+            try:
+                self.server_proc = winproc.spawn_server(argv)
+            except OSError as e:
+                print(f"failed to start local server: {e}")
+                self.server_proc = None
+                return False
+            return True
+
         launcher = Gio.SubprocessLauncher.new(
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE
         )
         try:
-            self.server_proc = launcher.spawnv([
-                "java",
-                "-Dsuwayomi.tachidesk.config.server.systemTrayEnabled=false",
-                "-Dsuwayomi.tachidesk.config.server.initialOpenInBrowserEnabled=false",
-                "-Dsuwayomi.tachidesk.config.server.kcefEnabled=false",
-                "-jar", jar_path,
-            ])
+            self.server_proc = launcher.spawnv(argv)
         except GLib.Error as e:
             print(f"failed to start local server: {e.message}")
             self.server_proc = None
@@ -155,7 +194,9 @@ class KaghezApplication(Adw.Application):
     def stop_local_server(self):
         if self.server_proc is None:
             return
-        if self.server_proc.get_identifier():
+        if sys.platform == "win32":
+            winproc.stop_server(self.server_proc)
+        elif self.server_proc.get_identifier():
             self.server_proc.send_signal(signal.SIGTERM)
             try:
                 self.server_proc.wait(None)

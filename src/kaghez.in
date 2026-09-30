@@ -43,6 +43,23 @@ if getattr(sys, 'frozen', False):
     pkgdatadir = os.path.join(base_dir, 'share', 'kaghez')
     localedir = os.path.join(base_dir, 'share', 'locale')
 
+    # build-aux/windows/build.sh compiles our GSettings schema into its
+    # own folder so it can't clash with GTK's bundled schemas. GLib
+    # searches every directory listed here, so prepend ours.
+    schema_dirs = [os.path.join(pkgdatadir, 'schemas')]
+    if os.environ.get('GSETTINGS_SCHEMA_DIR'):
+        schema_dirs.append(os.environ['GSETTINGS_SCHEMA_DIR'])
+    os.environ['GSETTINGS_SCHEMA_DIR'] = os.pathsep.join(schema_dirs)
+
+    # The windowed exe has no console, so print() would go nowhere. Keep
+    # the output (including the Suwayomi server's) in a log file instead.
+    if sys.stdout is None:
+        log_dir = os.path.join(os.environ.get('LOCALAPPDATA', exe_dir), 'kaghez')
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = open(os.path.join(log_dir, 'kaghez.log'), 'w',
+                        encoding='utf-8', errors='replace', buffering=1)
+        sys.stdout = sys.stderr = log_file
+
     # NOTE: previously set GI_TYPELIB_PATH manually here pointing at a
     # copied girepository-1.0 folder. Removed to test whether
     # PyInstaller's `gi` hook (hooksconfig in kaghez.spec) resolves

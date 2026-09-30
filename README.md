@@ -22,6 +22,18 @@ You can install Kaghez as flatpak
 </p>
 
 
+### Windows
+
+Installers and a portable zip are built by the [Windows build workflow](.github/workflows/windows.yml). They bundle GTK, a Java 21 runtime and the Suwayomi server, so nothing else needs to be installed.
+
+To build it yourself, install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell in the repository (with `git lfs pull` done) and run:
+
+```bash
+bash build-aux/windows/build.sh
+```
+
+The app ends up in `_build-windows/dist/Kaghez/Kaghez.exe`. Logs go to `%LOCALAPPDATA%\kaghez\kaghez.log`.
+
 ## Screenshots
 
 <table>

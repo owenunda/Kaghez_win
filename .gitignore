@@ -1,0 +1,3 @@
+_build-windows/
+.lfs-ids
+__pycache__/
