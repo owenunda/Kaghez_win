@@ -49,10 +49,36 @@ jobs:
               "share/kaghez/kaghez.gresource",
               "share/kaghez/Suwayomi-Server-v2.3.2361.jar",
               "share/kaghez/schemas/gschemas.compiled",
-              "share/kaghez/jre/bin/java.exe")) {
+              "share/kaghez/java/bin/java.exe")) {
             if (-not (Test-Path "$internal/$f")) { throw "missing $f" }
           }
-          & "$internal/share/kaghez/jre/bin/java.exe" -version
+          & "$internal/share/kaghez/java/bin/java.exe" -version
+
+          # Start the server exactly where the app keeps it and ask it the
+          # same GraphQL query Kaghez uses to decide the server is ready.
+          $server = Start-Process -PassThru -NoNewWindow `
+            -FilePath "$internal/share/kaghez/java/bin/java.exe" `
+            -RedirectStandardOutput server.log -RedirectStandardError server-err.log `
+            -ArgumentList @(
+              "-Dsuwayomi.tachidesk.config.server.systemTrayEnabled=false",
+              "-Dsuwayomi.tachidesk.config.server.initialOpenInBrowserEnabled=false",
+              "-Dsuwayomi.tachidesk.config.server.kcefEnabled=false",
+              "-jar", "`"$((Resolve-Path "$internal/share/kaghez/Suwayomi-Server-v2.3.2361.jar").Path)`"")
+          $ready = $false
+          for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-RestMethod -Method Post -Uri http://localhost:4567/api/graphql -TimeoutSec 5 `
+                -ContentType application/json -Body '{"query":"{ settings { downloadAsCbz } }"}'
+              $ready = $null -ne $r.data.settings
+            } catch {}
+          }
+          Stop-Process -Id $server.Id -Force
+          if (-not $ready) {
+            Get-Content server.log, server-err.log -Tail 60
+            throw "Suwayomi server didn't answer GraphQL"
+          }
+          Write-Host "Suwayomi server answered GraphQL after $($i * 2)s"
 
       - name: Build installer
         shell: pwsh

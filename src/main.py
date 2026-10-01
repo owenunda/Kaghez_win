@@ -133,7 +133,10 @@ class KaghezApplication(Adw.Application):
         """Prefer a JRE shipped next to the jar (the Windows build bundles
         one); otherwise rely on `java` from PATH, like the Flatpak does."""
         java_name = "java.exe" if sys.platform == "win32" else "java"
-        bundled = os.path.join(get_pkgdatadir(), 'jre', 'bin', java_name)
+        # Not named "jre": the server's class scanner (ClassGraph) treats the
+        # parent of a "jre" folder as part of the JDK and skips the jar
+        # sitting next to it, and the server then fails to start.
+        bundled = os.path.join(get_pkgdatadir(), 'java', 'bin', java_name)
         return bundled if os.path.isfile(bundled) else "java"
 
     async def start_local_server(self) -> bool:

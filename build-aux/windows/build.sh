@@ -82,8 +82,9 @@ if [[ ! -f "$JRE_ZIP" ]]; then
 fi
 rm -rf "$OUT/jre-unpacked"
 unzip -q "$JRE_ZIP" -d "$OUT/jre-unpacked"
-# The zip holds a single versioned folder (jdk-21.x.y+z-jre).
-mv "$OUT"/jre-unpacked/*/ "$PKGDATADIR/jre"
+# The zip holds a single versioned folder (jdk-21.x.y+z-jre). It must not
+# be called "jre", see find_java() in src/main.py.
+mv "$OUT"/jre-unpacked/*/ "$PKGDATADIR/java"
 rm -rf "$OUT/jre-unpacked"
 
 echo "==> app icon"
@@ -104,7 +105,7 @@ KAGHEZ_PREFIX="$PREFIX" KAGHEZ_OUT="$OUT" \
     --distpath "$OUT/dist" \
     --workpath "$OUT/pyinstaller" \
     build-aux/windows/kaghez.spec
-cp -r "$PKGDATADIR/jre" "$OUT/dist/Kaghez/_internal/share/kaghez/jre"
+cp -r "$PKGDATADIR/java" "$OUT/dist/Kaghez/_internal/share/kaghez/java"
 
 echo
 echo "Done: $OUT/dist/Kaghez/Kaghez.exe"
